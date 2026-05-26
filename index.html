@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shadow Creed: Pixel Chronicles</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #0b0f19;
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 30px rgba(231, 76, 60, 0.2);
+            border: 4px solid #2c3e50;
+            border-radius: 4px;
+        }
+        canvas {
+            display: block;
+        }
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 800px;
+            height: 400px;
+            background: rgba(7, 11, 20, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 40px;
+            box-sizing: border-box;
+            border-radius: 2px;
+        }
+        h1 {
+            font-size: 36px;
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px rgba(231, 76, 60, 0.5);
+        }
+        p {
+            max-width: 600px;
+            line-height: 1.8;
+            color: #bdc3c7;
+        }
+        button {
+            background: #c0392b;
+            color: white;
+            border: 2px solid #e74c3c;
+            padding: 12px 28px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 25px;
+            font-family: inherit;
+            letter-spacing: 1px;
+            transition: all 0.2s ease;
+        }
+        button:hover { 
+            background: #e74c3c;
+            box-shadow: 0 0 15px rgba(231, 76, 60, 0.6);
+            transform: scale(1.05);
+        }
+        .hidden { display: none !important; }
+        #instructions {
+            margin-top: 15px;
+            color: #85929e;
+            font-size: 13px;
+            text-align: center;
+            background: rgba(255,255,255,0.05);
+            padding: 8px 15px;
+            border-radius: 20px;
+        }
+        #level-indicator {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #e74c3c;
+            background: rgba(0,0,0,0.6);
+            padding: 5px 10px;
+            border-radius: 3px;
+            border-left: 3px solid #e74c3c;
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="level-indicator" class="hidden">MEMORIA: 1 / 3</div>
+
+    <!-- Pantalla de Inicio / Historia -->
+    <div id="start-screen" class="screen">
+        <h1 style="color: #e74c3c; letter-spacing: 4px;">SHADOW CREED</h1>
+        <p>
+            Masyaf, 1191. El Fragmento de Edén ha sido tomado por las fuerzas templarias de Robert de Sablé. 
+            Tu misión, hermano, es infiltrarte por los tejados, eludir las patrullas enemigas y recuperar la reliquia sagrada.
+            <br><br>
+            Actúa en las sombras. Recuerda siempre nuestro credo:<br>
+            <span style="color: #fff; font-style: italic;">"Nada es verdad, todo está permitido."</span>
+        </p>
+        <button onclick="startGame()">INICIAR ANIDAMIENTO</button>
+    </div>
+
+    <!-- Pantalla de Game Over -->
+    <div id="gameover-screen" class="screen hidden">
+        <h1 style="color: #c0392b;">DESINCRONIZACIÓN</h1>
+        <p>Has sido detectado por el enemigo o caíste al vacío. La simulación del Animus se ha colapsado de forma crítica.</p>
+        <button onclick="restartGame()">REINICIAR MEMORIA</button>
+    </div>
+
+    <!-- Pantalla de Victoria Final -->
+    <div id="victory-screen" class="screen hidden">
+        <h1 style="color: #2ecc71;">SINCRONIZACIÓN COMPLETA</h1>
+        <p>¡Increíble! Has recuperado el Fragmento de Edén en todas las zonas de conflicto y has asegurado el futuro de la Hermandad de Asesinos.</p>
+        <button onclick="restartGame()">REPLAY ANIMUS</button>
+    </div>
+
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+</div>
+
+<div id="instructions">
+    Controles: <b>← / →</b> Moverse | <b>↑</b> Saltar | <b>↓</b> Esconderse en paja | <b>Espacio</b> Hoja Oculta (Espalda) | Mantener <b>V</b> Visión de Águila
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Estados del juego
+let gameState = 'START'; 
+const keys = {};
+let currentLevel = 0;
+let stars = [];
+let pulseAnimation = 0;
+
+// Variables dinámicas de nivel
+let platforms = [];
+let haybales = [];
+let enemies = [];
+let pieceOfEden = {};
+
+// Jugador
+const player = {
+    x: 50, y: 200, width: 22, height: 42,
+    speed: 4, vx: 0, vy: 0,
+    grounded: false, isHidden: false, eagleVision: false
+};
+
+const gravity = 0.5;
+
+// BASE DE DATOS DE NIVELES (El desafío de expansión)
+const levels = [
+    {
+        name: "SECUENCIA 1: Los Tejados de Masyaf",
+        platforms: [
+            {x: 0, y: 320, width: 250, height: 80},
+            {x: 300, y: 260, width: 220, height: 140},
+            {x: 580, y: 300, width: 320, height: 100}
+        ],
+        haybales: [
+            {x: 130, y: 290, width: 45, height: 30},
+            {x: 620, y: 270, width: 45, height: 30}
+        ],
+        enemies: [
+            { x: 360, y: 218, width: 22, height: 42, startX: 310, endX: 490, speed: 1.5, dir: 1 },
+            { x: 680, y: 258, width: 22, height: 42, startX: 590, endX: 740, speed: 1.2, dir: -1 }
+        ],
+        eden: { x: 760, y: 275, width: 16, height: 16 }
+    },
+    {
+        name: "SECUENCIA 2: Infiltración en Acre",
+        platforms: [
+            {x: 0, y: 300, width: 180, height: 100},
+            {x: 230, y: 220, width: 160, height: 180},
+            {x: 440, y: 260, width: 140, height: 140},
+            {x: 630, y: 200, width: 200, height: 200}
+        ],
+        haybales: [
+            {x: 280, y: 190, width: 45, height: 30},
+            {x: 480, y: 230, width: 45, height: 30}
+        ],
+        enemies: [
+            { x: 240, y: 178, width: 22, height: 42, startX: 235, endX: 360, speed: 2.2, dir: 1 },
+            { x: 650, y: 158, width: 22, height: 42, startX: 640, endX: 780, speed: 1.6, dir: -1 }
+        ],
+        eden: { x: 750, y: 175, width: 16, height: 16 }
+    },
+    {
+        name: "SECUENCIA 3: La Ciudadela de Jerusalén",
+        platforms: [
+            {x: 0, y: 330, width: 120, height: 70},
+            {x: 170, y: 270, width: 130, height: 130},
+            {x: 350, y: 200, width: 130, height: 200},
+            {x: 530, y: 250, width: 110, height: 150},
+            {x: 680, y: 180, width: 150, height: 220}
+        ],
+        haybales: [
+            {x: 210, y: 240, width: 45, height: 30},
+            {x: 390, y: 170, width: 45, height: 30}
+        ],
+        enemies: [
+            { x: 180, y: 228, width: 22, height: 42, startX: 175, endX: 280, speed: 2.0, dir: 1 },
+            { x: 360, y: 158, width: 22, height: 42, startX: 355, endX: 460, speed: 2.5, dir: -1 },
+            { x: 700, y: 138, width: 22, height: 42, startX: 685, endX: 790, speed: 1.8, dir: 1 }
+        ],
+        eden: { x: 770, y: 155, width: 16, height: 16 }
+    }
+];
+
+// Generador estético de estrellas de fondo
+for(let i=0; i<40; i++) {
+    stars.push({ x: Math.random()*800, y: Math.random()*180, size: Math.random()*2, alpha: Math.random() });
+}
+
+window.addEventListener('keydown', e => { keys[e.key] = true; });
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+function startGame() {
+    document.getElementById('start-screen').classList.add('hidden');
+    document.getElementById('level-indicator').classList.remove('hidden');
+    currentLevel = 0;
+    initLevel();
+    gameState = 'PLAYING';
+    gameLoop();
+}
+
+function restartGame() {
+    document.getElementById('gameover-screen').classList.add('hidden');
+    document.getElementById('victory-screen').classList.add('hidden');
+    document.getElementById('level-indicator').classList.remove('hidden');
+    currentLevel = 0;
+    initLevel();
+    gameState = 'PLAYING';
+}
+
+function initLevel() {
+    player.x = 40; player.y = 150; player.vx = 0; player.vy = 0;
+    player.isHidden = false;
+    
+    // Carga dinámica del set de datos del nivel
+    let lvl = levels[currentLevel];
+    document.getElementById('level-indicator').innerText = lvl.name;
+    
+    platforms = lvl.platforms;
+    haybales = lvl.haybales;
+    pieceOfEden = { ...lvl.eden, collected: false };
+    enemies = lvl.enemies.map(e => ({ ...e, alert: false }));
+}
+
+function update() {
+    if (gameState !== 'PLAYING') return;
+
+    pulseAnimation += 0.1;
+    player.eagleVision = !!(keys['v'] || keys['V']);
+
+    // Movimiento
+    if (!player.isHidden) {
+        if (keys['ArrowRight']) player.vx = player.speed;
+        else if (keys['ArrowLeft']) player.vx = -player.speed;
+        else player.vx = 0;
+
+        if (keys['ArrowUp'] && player.grounded) {
+            player.vy = -11;
+            player.grounded = false;
+        }
+    } else {
+        player.vx = 0;
+        if (keys['ArrowRight'] || keys['ArrowLeft'] || keys['ArrowUp']) player.isHidden = false;
+    }
+
+    player.vy += gravity;
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // Lógica Esconderse
+    let overHaybale = false;
+    haybales.forEach(bale => {
+        if (player.x + player.width > bale.x && player.x < bale.x + bale.width &&
+            player.y + player.height >= bale.y && player.y <= bale.y + bale.height) {
+            overHaybale = true;
+            if (keys['ArrowDown']) player.isHidden = true;
+        }
+    });
+    if (!overHaybale) player.isHidden = false;
+
+    // Colisión plataformas
+    player.grounded = false;
+    platforms.forEach(plat => {
+        if (player.x < plat.x + plat.width && player.x + player.width > plat.x &&
+            player.y + player.height > plat.y && player.y + player.height - player.vy <= plat.y) {
+            player.y = plat.y - player.height;
+            player.vy = 0;
+            player.grounded = true;
+        }
+    });
+
+    // IA Enemigos y Asesinatos
+    enemies.forEach(enemy => {
+        enemy.x += enemy.speed * enemy.dir;
+        if (enemy.x > enemy.endX) { enemy.x = enemy.endX; enemy.dir = -1; }
+        if (enemy.x < enemy.startX) { enemy.x = enemy.startX; enemy.dir = 1; }
+
+        let visionDist = 130;
+        let inSight = false;
+        if (enemy.dir === 1 && player.x > enemy.x && player.x < enemy.x + visionDist) inSight = true;
+        if (enemy.dir === -1 && player.x < enemy.x && player.x > enemy.x - visionDist) inSight = true;
+
+        if (inSight && !player.isHidden && Math.abs((player.y + player.height) - (enemy.y + enemy.height)) < 20) {
+            gameState = 'GAMEOVER';
+            document.getElementById('gameover-screen').classList.remove('hidden');
+            document.getElementById('level-indicator').classList.add('hidden');
+        }
+
+        // Ejecución con Hoja Oculta
+        if (keys[' ']) {
+            let dist = Math.abs(player.x - enemy.x);
+            let playerBehind = (enemy.dir === 1 && player.x < enemy.x) || (enemy.dir === -1 && player.x > enemy.x);
+            if (dist < 40 && playerBehind && Math.abs(player.y - enemy.y) < 20) {
+                enemies = enemies.filter(e => e !== enemy);
+            }
+        }
+    });
+
+    // Control de meta / cambio de nivel
+    if (player.x + player.width > pieceOfEden.x && player.x < pieceOfEden.x + pieceOfEden.width &&
+        player.y + player.height > pieceOfEden.y && player.y < pieceOfEden.y + pieceOfEden.height) {
+        
+        if (currentLevel < levels.length - 1) {
+            currentLevel++;
+            initLevel();
+        } else {
+            gameState = 'VICTORY';
+            document.getElementById('victory-screen').classList.remove('hidden');
+            document.getElementById('level-indicator').classList.add('hidden');
+        }
+    }
+
+    // Caída al vacío
+    if (player.y > canvas.height) {
+        gameState = 'GAMEOVER';
+        document.getElementById('gameover-screen').classList.remove('hidden');
+        document.getElementById('level-indicator').classList.add('hidden');
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // --- DISEÑO: FONDO ATMOSFÉRICO ---
+    if (player.eagleVision) {
+        ctx.fillStyle = '#051329';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    } else {
+        let skyGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        skyGrad.addColorStop(0, '#0f141d');
+        skyGrad.addColorStop(0.5, '#192535');
+        skyGrad.addColorStop(1, '#2c3e50');
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Estrellas titilantes
+        ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+        stars.forEach(star => {
+            if(Math.random() > 0.98) star.alpha = Math.random();
+            ctx.globalAlpha = star.alpha;
+            ctx.fillRect(star.x, star.y, star.size, star.size);
+        });
+        ctx.globalAlpha = 1.0;
+    }
+
+    // --- DISEÑO: EDIFICIOS / PLATAFORMAS EN 2.5D ---
+    platforms.forEach(plat => {
+        if (player.eagleVision) {
+            ctx.fillStyle = '#102a45';
+            ctx.fillRect(plat.x, plat.y, plat.width, plat.height);
+            ctx.strokeStyle = '#2b6cb0';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(plat.x, plat.y, plat.width, plat.height);
+        } else {
+            // Cuerpo de piedra del edificio
+            ctx.fillStyle = '#2c3e50';
+            ctx.fillRect(plat.x, plat.y, plat.width, plat.height);
+            
+            // Tejas superiores del tejado antiguas
+            ctx.fillStyle = '#7f8c8d';
+            ctx.fillRect(plat.x, plat.y, plat.width, 8);
+            ctx.fillStyle = '#95a5a6';
+            ctx.fillRect(plat.x, plat.y, plat.width, 3);
+
+            // Ventanas de fondo iluminadas arqueadas medievales
+            ctx.fillStyle = '#f1c40f';
+            let winW = 8, winH = 14;
+            for (let wx = plat.x + 20; wx < plat.x + plat.width - 20; wx += 40) {
+                ctx.fillRect(wx, plat.y + 25, winW, winH);
+                ctx.beginPath();
+                ctx.arc(wx + winW/2, plat.y + 25, winW/2, 0, Math.PI, true);
+                ctx.fill();
+            }
+        }
+    });
+
+    // --- DISEÑO: FARDOS DE PAJA REALISTAS ---
+    haybales.forEach(bale => {
+        if (player.eagleVision) {
+            ctx.fillStyle = 'rgba(46, 204, 113, 0.8)';
+            ctx.fillRect(bale.x, bale.y, bale.width, bale.height);
+        } else {
+            // Textura paja degradado oro viejo
+            let strawGrad = ctx.createLinearGradient(bale.x, bale.y, bale.x, bale.y + bale.height);
+            strawGrad.addColorStop(0, '#f1c40f');
+            strawGrad.addColorStop(1, '#d35400');
+            ctx.fillStyle = strawGrad;
+            ctx.fillRect(bale.x, bale.y, bale.width, bale.height);
+            
+            // Líneas de detalles del fardo de paja
+            ctx.strokeStyle = '#b7950b';
+            ctx.lineWidth = 1.5;
+            for(let i=4; i<bale.width; i+=8) {
+                ctx.beginPath(); ctx.moveTo(bale.x + i, bale.y); ctx.lineTo(bale.x + i - 3, bale.y + bale.height); ctx.stroke();
+            }
+            // Cuerda de atado
+            ctx.fillStyle = '#6e2c00';
+            ctx.fillRect(bale.x, bale.y + bale.height/2 - 2, bale.width, 3);
+        }
+    });
+
+    // --- DISEÑO: FRAGMENTO DE EDÉN (EFECTO BRILLO/PULSO) ---
+    if (!pieceOfEden.collected) {
+        let sizeMod = Math.sin(pulseAnimation) * 3;
+        ctx.fillStyle = '#f39c12';
+        ctx.shadowBlur = 15 + sizeMod;
+        ctx.shadowColor = '#f1c40f';
+        
+        ctx.beginPath();
+        ctx.arc(pieceOfEden.x + pieceOfEden.width/2, pieceOfEden.y + pieceOfEden.height/2, (pieceOfEden.width/2) + sizeMod/2, 0, Math.PI*2);
+        ctx.fill();
+        
+        ctx.shadowBlur = 0; // Reset
+    }
+
+    // --- DISEÑO: GUARDIAS TEMPLARIOS DETALLADOS ---
+    enemies.forEach(enemy => {
+        if (player.eagleVision) {
+            ctx.fillStyle = '#e53e3e'; 
+            ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+            
+            // Cono de visión táctico en azul/rojo suave
+            ctx.fillStyle = 'rgba(229, 62, 62, 0.15)';
+            if (enemy.dir === 1) ctx.fillRect(enemy.x + enemy.width, enemy.y, 130, enemy.height);
+            else ctx.fillRect(enemy.x - 130, enemy.y, 130, enemy.height);
+        } else {
+            // Túnica Base blanca templaria
+            ctx.fillStyle = '#ecf0f1';
+            ctx.fillRect(enemy.x, enemy.y + 10, enemy.width, enemy.height - 10);
+            
+            // Gran Cruz de los caballeros templarios
+            ctx.fillStyle = '#c0392b';
+            ctx.fillRect(enemy.x + 4, enemy.y + 16, enemy.width - 8, 4); // Eje Horizontal
+            ctx.fillRect(enemy.x + enemy.width/2 - 2, enemy.y + 12, 4, 16); // Eje Vertical
+
+            // Yelmo / Casco de Hierro con ranura visual
+            ctx.fillStyle = '#7f8c8d';
+            ctx.fillRect(enemy.x + 2, enemy.y, enemy.width - 4, 10);
+            ctx.fillStyle = '#111';
+            ctx.fillRect(enemy.x + (enemy.dir === 1 ? 10 : 2), enemy.y + 3, 10, 2); // Visor negro
+            
+            // Botas y cinturón de cuero
+            ctx.fillStyle = '#3e2723';
+            ctx.fillRect(enemy.x, enemy.y + enemy.height - 5, enemy.width, 5); // Botas
+            ctx.fillRect(enemy.x, enemy.y + 24, enemy.width, 3); // Cinturón
+        }
+    });
+
+    // --- DISEÑO: ALTAÏR (EL ASESINO PROTAGONISTA) ---
+    if (!player.isHidden) {
+        if (player.eagleVision) {
+            ctx.fillStyle = '#ffffff'; 
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+        } else {
+            // Túnica blanca fluida de la hermandad
+            ctx.fillStyle = '#f4f6f7';
+            ctx.fillRect(player.x, player.y + 8, player.width, player.height - 8);
+
+            // Capucha con el mítico pico de águila assassin
+            ctx.fillStyle = '#e5e8e8';
+            ctx.beginPath();
+            ctx.moveTo(player.x, player.y + 10);
+            ctx.lineTo(player.x + player.width/2, player.y); // Punta superior
+            ctx.lineTo(player.x + player.width, player.y + 10);
+            ctx.lineTo(player.x + player.width/2 + (player.vx >= 0 ? 3 : -3), player.y + 12); // Pico facial
+            ctx.fill();
+
+            // Sombra oscura bajo la capucha que oculta la cara
+            ctx.fillStyle = '#1c2833';
+            ctx.fillRect(player.x + 4, player.y + 6, player.width - 8, 4);
+
+            // Fajín / Cinturón Rojo Escarlata ancho
+            ctx.fillStyle = '#cb4335';
+            ctx.fillRect(player.x, player.y + 22, player.width, 5);
+            
+            // Botas marrones oscuras de cuero
+            ctx.fillStyle = '#4a235a';
+            ctx.fillRect(player.x + 2, player.y + player.height - 6, player.width - 4, 6);
+        }
+    } else {
+        // Marcador discreto de ocultamiento
+        ctx.fillStyle = '#2ecc71';
+        ctx.font = 'bold 11px Courier New';
+        ctx.fillText("• MEZCLADO •", player.x - 20, player.y + 15);
+    }
+}
+
+function gameLoop() {
+    update();
+    draw();
+    if (gameState === 'PLAYING') {
+        requestAnimationFrame(gameLoop);
+    }
+}
+</script>
+
+</body>
+</html>
